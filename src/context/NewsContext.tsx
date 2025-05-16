@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Article, Category, UserPreferences } from '../types';
-import { MOCK_ARTICLES, CATEGORIES } from '../constants/mockData';
+import { CATEGORIES } from '../constants/mockData';
+import { fetchNews, getPersonalizedRecommendations } from '../services/newsService';
 
 type NewsContextType = {
   articles: Article[];
@@ -13,6 +14,7 @@ type NewsContextType = {
   setSearchQuery: (query: string) => void;
   toggleBookmark: (articleId: string) => void;
   toggleCategoryPreference: (category: Category) => void;
+  refreshNews: () => Promise<void>;
 };
 
 const NewsContext = createContext<NewsContextType | undefined>(undefined);
@@ -24,7 +26,7 @@ const defaultUserPreferences: UserPreferences = {
 };
 
 export function NewsProvider({ children }: { children: ReactNode }) {
-  const [articles] = useState<Article[]>(MOCK_ARTICLES);
+  const [articles, setArticles] = useState<Article[]>([]);
   const [activeCategory, setActiveCategory] = useState<Category | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [userPreferences, setUserPreferences] = useState<UserPreferences>(() => {
@@ -32,7 +34,28 @@ export function NewsProvider({ children }: { children: ReactNode }) {
     return savedPreferences ? JSON.parse(savedPreferences) : defaultUserPreferences;
   });
 
-  // Filter articles based on active category and search query
+  const refreshNews = async () => {
+    try {
+      const newsArticles = await fetchNews(activeCategory === 'all' ? '' : activeCategory);
+      const recommendations = await getPersonalizedRecommendations(userPreferences.preferredCategories);
+      
+      // Combine and deduplicate articles
+      const combinedArticles = [...newsArticles, ...recommendations];
+      const uniqueArticles = Array.from(new Map(combinedArticles.map(item => [item.id, item])).values());
+      
+      setArticles(uniqueArticles);
+    } catch (error) {
+      console.error('Error refreshing news:', error);
+    }
+  };
+
+  useEffect(() => {
+    refreshNews();
+    // Refresh news every 5 minutes
+    const interval = setInterval(refreshNews, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [activeCategory, userPreferences.preferredCategories]);
+
   const filteredArticles = articles.filter((article) => {
     const matchesCategory = activeCategory === 'all' || article.category === activeCategory;
     const matchesSearch = searchQuery === '' || 
@@ -41,7 +64,6 @@ export function NewsProvider({ children }: { children: ReactNode }) {
     return matchesCategory && matchesSearch;
   });
 
-  // Save user preferences to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('userPreferences', JSON.stringify(userPreferences));
   }, [userPreferences]);
@@ -85,7 +107,8 @@ export function NewsProvider({ children }: { children: ReactNode }) {
       setActiveCategory,
       setSearchQuery,
       toggleBookmark,
-      toggleCategoryPreference
+      toggleCategoryPreference,
+      refreshNews
     }}>
       {children}
     </NewsContext.Provider>
